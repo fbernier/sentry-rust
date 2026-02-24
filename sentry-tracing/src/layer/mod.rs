@@ -407,6 +407,7 @@ where
     /// When a span gets closed, finish the underlying sentry span, and set back
     /// its parent as the *current* sentry span.
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
+
         let span = match ctx.span(&id) {
             Some(span) => span,
             None => return,
