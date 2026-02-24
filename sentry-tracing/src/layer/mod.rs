@@ -245,6 +245,11 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event, ctx: Context<'_, S>) {
+        // Fast path: skip all event processing when no Sentry client is active.
+        if !sentry_core::Hub::with_active(|_| true) {
+            return;
+        }
+
         let items = match &self.event_mapper {
             Some(mapper) => mapper(event, ctx),
             None => {
@@ -302,13 +307,17 @@ where
             return;
         }
 
+        let hub = sentry_core::Hub::current();
+        if !hub.has_client() {
+            return;
+        }
+
         let (data, sentry_name, sentry_op, sentry_trace) = extract_span_data(attrs);
         let sentry_name = sentry_name.as_deref().unwrap_or_else(|| span.name());
         let sentry_op =
             sentry_op.unwrap_or_else(|| format!("{}::{}", span.metadata().target(), span.name()));
 
-        let hub = sentry_core::Hub::current();
-        let parent_sentry_span = hub.configure_scope(|scope| scope.get_span());
+        let parent_sentry_span = hub.configure_scope_direct(|scope| scope.get_span());
 
         let mut sentry_span: sentry_core::TransactionOrSpan = match &parent_sentry_span {
             Some(parent) => parent.start_child(&sentry_op, sentry_name).into(),
@@ -366,7 +375,7 @@ where
             // to use a new hub to avoid altering state on the original thread.
             let hub = Arc::new(Hub::new_from_top(&data.hub));
 
-            hub.configure_scope(|scope| {
+            hub.configure_scope_direct(|scope| {
                 scope.set_span(Some(data.sentry_span.clone()));
             });
 
