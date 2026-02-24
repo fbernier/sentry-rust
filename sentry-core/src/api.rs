@@ -108,7 +108,7 @@ pub fn capture_message(msg: &str, level: Level) -> Uuid {
 ///
 /// [`IntoBreadcrumbs`]: trait.IntoBreadcrumbs.html
 pub fn add_breadcrumb<B: IntoBreadcrumbs>(breadcrumb: B) {
-    Hub::with_active(|hub| hub.add_breadcrumb(breadcrumb))
+    Hub::with(|hub| hub.add_breadcrumb(breadcrumb))
 }
 
 /// Invokes a function that can modify the current scope.

@@ -245,11 +245,6 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event, ctx: Context<'_, S>) {
-        // Fast path: skip all event processing when no Sentry client is active.
-        if !sentry_core::Hub::with_active(|_| true) {
-            return;
-        }
-
         let items = match &self.event_mapper {
             Some(mapper) => mapper(event, ctx),
             None => {
@@ -277,22 +272,24 @@ where
         };
         let items = CombinedEventMapping::from(items);
 
-        for item in items.0 {
-            match item {
-                EventMapping::Ignore => (),
-                EventMapping::Breadcrumb(breadcrumb) => sentry_core::add_breadcrumb(breadcrumb),
-                EventMapping::Event(event) => {
-                    sentry_core::capture_event(event);
-                }
-                #[cfg(feature = "logs")]
-                EventMapping::Log(log) => sentry_core::Hub::with_active(|hub| hub.capture_log(log)),
-                EventMapping::Combined(_) => {
-                    sentry_core::sentry_debug!(
-                        "[SentryLayer] found nested CombinedEventMapping, ignoring"
-                    )
+        sentry_core::Hub::with_active(|hub| {
+            for item in items.0 {
+                match item {
+                    EventMapping::Ignore => (),
+                    EventMapping::Breadcrumb(breadcrumb) => hub.add_breadcrumb(breadcrumb),
+                    EventMapping::Event(event) => {
+                        hub.capture_event(event);
+                    }
+                    #[cfg(feature = "logs")]
+                    EventMapping::Log(log) => hub.capture_log(log),
+                    EventMapping::Combined(_) => {
+                        sentry_core::sentry_debug!(
+                            "[SentryLayer] found nested CombinedEventMapping, ignoring"
+                        )
+                    }
                 }
             }
-        }
+        });
     }
 
     /// When a new Span gets created, run the filter and start a new sentry span
