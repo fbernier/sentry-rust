@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use bitflags::bitflags;
@@ -362,15 +362,16 @@ where
 
         let extensions = span.extensions();
         if let Some(data) = extensions.get::<SentrySpanData>() {
-            // We fork the hub (based on the hub associated with the span)
-            // upon entering the span. This prevents data leakage if the span
-            // is entered and exited multiple times.
-            //
-            // Further, Hubs are meant to manage thread-local state, even
-            // though they can be shared across threads. As the span may being
-            // entered on a different thread than where it was created, we need
-            // to use a new hub to avoid altering state on the original thread.
-            let hub = Arc::new(Hub::new_from_top(&data.hub));
+            // Get or create a forked hub for this span on this thread.
+            // Cached so repeat entries (e.g. async polls) reuse it instead of
+            // allocating a fresh Hub every time. The cache is thread-local, so
+            // cross-thread safety is inherent.
+            let hub = HUB_CACHE.with_borrow_mut(|cache| {
+                cache
+                    .entry(id.clone())
+                    .or_insert_with(|| Arc::new(Hub::new_from_top(&data.hub)))
+                    .clone()
+            });
 
             hub.configure_scope_direct(|scope| {
                 scope.set_span(Some(data.sentry_span.clone()));
@@ -404,6 +405,9 @@ where
     /// When a span gets closed, finish the underlying sentry span, and set back
     /// its parent as the *current* sentry span.
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
+        HUB_CACHE.with_borrow_mut(|cache| {
+            cache.remove(&id);
+        });
 
         let span = match ctx.span(&id) {
             Some(span) => span,
@@ -535,6 +539,12 @@ thread_local! {
     /// Guard bookkeeping is thread-local by design. Correctness expects
     /// balanced enter/exit callbacks on the same thread.
     static SPAN_GUARDS: RefCell<SpanGuardStack> = RefCell::new(SpanGuardStack::new());
+    /// Cached forked hubs keyed by span ID.
+    ///
+    /// Each span gets at most one forked hub per thread. Re-entries (e.g. async
+    /// polls) reuse the cached hub instead of allocating a fresh fork each time.
+    /// Entries are removed in `on_close` when the span finishes.
+    static HUB_CACHE: RefCell<HashMap<span::Id, Arc<Hub>>> = RefCell::new(HashMap::new());
 }
 
 /// Records all span fields into a `BTreeMap`, reusing a mutable `String` as buffer.
