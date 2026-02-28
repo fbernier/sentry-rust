@@ -42,9 +42,9 @@ fn transaction_lifecycle_benchmark(c: &mut Criterion) {
         group.bench_function("start-finish-sampled", |b| {
             sentry::Hub::run(hub_sampled.clone(), || {
                 b.iter(|| {
-                    let tx = sentry::start_transaction(
-                        sentry::TransactionContext::new("bench", "bench.op"),
-                    );
+                    let tx = sentry::start_transaction(sentry::TransactionContext::new(
+                        "bench", "bench.op",
+                    ));
                     tx.finish();
                 })
             })
@@ -53,9 +53,9 @@ fn transaction_lifecycle_benchmark(c: &mut Criterion) {
         group.bench_function("start-finish-unsampled", |b| {
             sentry::Hub::run(hub_unsampled.clone(), || {
                 b.iter(|| {
-                    let tx = sentry::start_transaction(
-                        sentry::TransactionContext::new("bench", "bench.op"),
-                    );
+                    let tx = sentry::start_transaction(sentry::TransactionContext::new(
+                        "bench", "bench.op",
+                    ));
                     tx.finish();
                 })
             })
@@ -63,9 +63,8 @@ fn transaction_lifecycle_benchmark(c: &mut Criterion) {
 
         group.bench_function("start-child-span", |b| {
             sentry::Hub::run(hub_sampled.clone(), || {
-                let tx = sentry::start_transaction(
-                    sentry::TransactionContext::new("bench", "bench.op"),
-                );
+                let tx =
+                    sentry::start_transaction(sentry::TransactionContext::new("bench", "bench.op"));
                 b.iter(|| {
                     let span = tx.start_child("child.op", "child span");
                     span.finish();
@@ -77,9 +76,9 @@ fn transaction_lifecycle_benchmark(c: &mut Criterion) {
         group.bench_function("transaction-with-10-spans", |b| {
             sentry::Hub::run(hub_sampled.clone(), || {
                 b.iter(|| {
-                    let tx = sentry::start_transaction(
-                        sentry::TransactionContext::new("bench", "bench.op"),
-                    );
+                    let tx = sentry::start_transaction(sentry::TransactionContext::new(
+                        "bench", "bench.op",
+                    ));
                     for i in 0..10 {
                         let span = tx.start_child("child.op", &format!("span {i}"));
                         span.finish();
@@ -100,11 +99,26 @@ fn transaction_metadata_benchmark(c: &mut Criterion) {
     {
         let hub = Arc::new(hub_with_sample_rate(1.0));
 
+        group.bench_function("set-request-and-origin", |b| {
+            sentry::Hub::run(hub.clone(), || {
+                let tx =
+                    sentry::start_transaction(sentry::TransactionContext::new("bench", "bench.op"));
+                b.iter(|| {
+                    let request = Request {
+                        method: Some("GET".into()),
+                        url: Some("https://example.com/api/test".parse().unwrap()),
+                        ..Default::default()
+                    };
+                    tx.set_request_and_origin(request, "auto.http.bench");
+                });
+                tx.finish();
+            })
+        });
+
         group.bench_function("set-request-separate", |b| {
             sentry::Hub::run(hub.clone(), || {
-                let tx = sentry::start_transaction(
-                    sentry::TransactionContext::new("bench", "bench.op"),
-                );
+                let tx =
+                    sentry::start_transaction(sentry::TransactionContext::new("bench", "bench.op"));
                 b.iter(|| {
                     let request = Request {
                         method: Some("GET".into()),

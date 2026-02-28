@@ -48,6 +48,12 @@ fn hub_operations_benchmark(c: &mut Criterion) {
             })
         });
 
+        group.bench_function("hub-has-client", |b| {
+            sentry::Hub::run(hub.clone(), || {
+                b.iter(|| sentry::Hub::with(|hub| hub.has_client()))
+            })
+        });
+
         group.bench_function("hub-client-arc-clone", |b| {
             sentry::Hub::run(hub.clone(), || {
                 b.iter(|| sentry::Hub::with(|hub| hub.client()))
@@ -75,6 +81,16 @@ fn scope_mutation_benchmark(c: &mut Criterion) {
             sentry::Hub::run(hub.clone(), || {
                 b.iter(|| {
                     sentry::configure_scope(|scope| {
+                        scope.set_tag("bench-key", "bench-value");
+                    })
+                })
+            })
+        });
+
+        group.bench_function("configure-scope-direct", |b| {
+            sentry::Hub::run(hub.clone(), || {
+                b.iter(|| {
+                    sentry::configure_scope_direct(|scope| {
                         scope.set_tag("bench-key", "bench-value");
                     })
                 })
