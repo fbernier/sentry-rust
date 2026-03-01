@@ -647,6 +647,12 @@ pub struct Transaction {
     pub(crate) inner: TransactionArc,
     #[cfg(feature = "client")]
     metadata: TransactionMetadata,
+    /// Immutable after construction — no lock needed for reads.
+    trace_id: protocol::TraceId,
+    span_id: protocol::SpanId,
+    #[allow(dead_code)]
+    parent_span_id: Option<protocol::SpanId>,
+    sampled: bool,
 }
 
 /// Iterable for a transaction's [data attributes](protocol::TraceContext::data).
@@ -675,6 +681,10 @@ impl<'a> TransactionData<'a> {
 impl Transaction {
     #[cfg(feature = "client")]
     fn new(client: Option<Arc<Client>>, ctx: TransactionContext) -> Self {
+        let trace_id = ctx.trace_id;
+        let span_id = ctx.span_id;
+        let parent_span_id = ctx.parent_span_id;
+
         let ((sampled, sample_rate), transaction) = match client.as_ref() {
             Some(client) => {
                 let (sampled, sample_rate) = client.determine_sampling_decision(&ctx);
@@ -698,9 +708,9 @@ impl Transaction {
         };
 
         let context = protocol::TraceContext {
-            trace_id: ctx.trace_id,
-            parent_span_id: ctx.parent_span_id,
-            span_id: ctx.span_id,
+            trace_id,
+            parent_span_id,
+            span_id,
             op: Some(ctx.op),
             ..Default::default()
         };
@@ -713,18 +723,27 @@ impl Transaction {
                 transaction,
             })),
             metadata: TransactionMetadata { sample_rate },
+            trace_id,
+            span_id,
+            parent_span_id,
+            sampled,
         }
     }
 
     #[cfg(not(feature = "client"))]
     fn new_noop(ctx: TransactionContext) -> Self {
+        let trace_id = ctx.trace_id;
+        let span_id = ctx.span_id;
+        let parent_span_id = ctx.parent_span_id;
+        let sampled = ctx.sampled.unwrap_or(false);
+
         let context = protocol::TraceContext {
-            trace_id: ctx.trace_id,
-            parent_span_id: ctx.parent_span_id,
+            trace_id,
+            parent_span_id,
+            span_id,
             op: Some(ctx.op),
             ..Default::default()
         };
-        let sampled = ctx.sampled.unwrap_or(false);
 
         Self {
             inner: Arc::new(Mutex::new(TransactionInner {
@@ -732,6 +751,10 @@ impl Transaction {
                 context,
                 transaction: None,
             })),
+            trace_id,
+            span_id,
+            parent_span_id,
+            sampled,
         }
     }
 
@@ -833,12 +856,7 @@ impl Transaction {
     /// Use [`crate::Scope::iter_trace_propagation_headers`] to obtain the active
     /// trace's distributed tracing headers.
     pub fn iter_headers(&self) -> TraceHeadersIter {
-        let inner = self.inner.lock().unwrap();
-        let trace = SentryTrace::new(
-            inner.context.trace_id,
-            inner.context.span_id,
-            Some(inner.sampled),
-        );
+        let trace = SentryTrace::new(self.trace_id, self.span_id, Some(self.sampled));
         TraceHeadersIter {
             sentry_trace: Some(trace.to_string()),
         }
@@ -846,7 +864,7 @@ impl Transaction {
 
     /// Get the sampling decision for this Transaction.
     pub fn is_sampled(&self) -> bool {
-        self.inner.lock().unwrap().sampled
+        self.sampled
     }
 
     /// Finishes the Transaction with the provided end timestamp.
@@ -910,10 +928,9 @@ impl Transaction {
     /// The span must be explicitly finished via [`Span::finish`].
     #[must_use = "a span must be explicitly closed via `finish()`"]
     pub fn start_child(&self, op: &str, description: &str) -> Span {
-        let inner = self.inner.lock().unwrap();
         let span = protocol::Span {
-            trace_id: inner.context.trace_id,
-            parent_span_id: Some(inner.context.span_id),
+            trace_id: self.trace_id,
+            parent_span_id: Some(self.span_id),
             op: Some(op.into()),
             description: if description.is_empty() {
                 None
@@ -924,7 +941,9 @@ impl Transaction {
         };
         Span {
             transaction: Arc::clone(&self.inner),
-            sampled: inner.sampled,
+            sampled: self.sampled,
+            trace_id: self.trace_id,
+            span_id: span.span_id,
             span: Arc::new(Mutex::new(span)),
         }
     }
@@ -940,10 +959,9 @@ impl Transaction {
         id: SpanId,
         timestamp: SystemTime,
     ) -> Span {
-        let inner = self.inner.lock().unwrap();
         let span = protocol::Span {
-            trace_id: inner.context.trace_id,
-            parent_span_id: Some(inner.context.span_id),
+            trace_id: self.trace_id,
+            parent_span_id: Some(self.span_id),
             op: Some(op.into()),
             description: if description.is_empty() {
                 None
@@ -956,7 +974,9 @@ impl Transaction {
         };
         Span {
             transaction: Arc::clone(&self.inner),
-            sampled: inner.sampled,
+            sampled: self.sampled,
+            trace_id: self.trace_id,
+            span_id: span.span_id,
             span: Arc::new(Mutex::new(span)),
         }
     }
@@ -1005,6 +1025,8 @@ impl DerefMut for Data<'_> {
 pub struct Span {
     pub(crate) transaction: TransactionArc,
     sampled: bool,
+    trace_id: protocol::TraceId,
+    span_id: protocol::SpanId,
     span: SpanArc,
 }
 
@@ -1048,8 +1070,7 @@ impl Span {
 
     /// Get the current span ID.
     pub fn get_span_id(&self) -> protocol::SpanId {
-        let span = self.span.lock().unwrap();
-        span.span_id
+        self.span_id
     }
 
     /// Get the status of the Span.
@@ -1115,8 +1136,7 @@ impl Span {
     /// Use [`crate::Scope::iter_trace_propagation_headers`] to obtain the active
     /// trace's distributed tracing headers.
     pub fn iter_headers(&self) -> TraceHeadersIter {
-        let span = self.span.lock().unwrap();
-        let trace = SentryTrace::new(span.trace_id, span.span_id, Some(self.sampled));
+        let trace = SentryTrace::new(self.trace_id, self.span_id, Some(self.sampled));
         TraceHeadersIter {
             sentry_trace: Some(trace.to_string()),
         }
@@ -1161,10 +1181,9 @@ impl Span {
     /// The span must be explicitly finished via [`Span::finish`].
     #[must_use = "a span must be explicitly closed via `finish()`"]
     pub fn start_child(&self, op: &str, description: &str) -> Span {
-        let span = self.span.lock().unwrap();
-        let span = protocol::Span {
-            trace_id: span.trace_id,
-            parent_span_id: Some(span.span_id),
+        let new_span = protocol::Span {
+            trace_id: self.trace_id,
+            parent_span_id: Some(self.span_id),
             op: Some(op.into()),
             description: if description.is_empty() {
                 None
@@ -1176,7 +1195,9 @@ impl Span {
         Span {
             transaction: self.transaction.clone(),
             sampled: self.sampled,
-            span: Arc::new(Mutex::new(span)),
+            trace_id: self.trace_id,
+            span_id: new_span.span_id,
+            span: Arc::new(Mutex::new(new_span)),
         }
     }
 
@@ -1191,10 +1212,9 @@ impl Span {
         id: SpanId,
         timestamp: SystemTime,
     ) -> Span {
-        let span = self.span.lock().unwrap();
-        let span = protocol::Span {
-            trace_id: span.trace_id,
-            parent_span_id: Some(span.span_id),
+        let new_span = protocol::Span {
+            trace_id: self.trace_id,
+            parent_span_id: Some(self.span_id),
             op: Some(op.into()),
             description: if description.is_empty() {
                 None
@@ -1208,7 +1228,9 @@ impl Span {
         Span {
             transaction: self.transaction.clone(),
             sampled: self.sampled,
-            span: Arc::new(Mutex::new(span)),
+            trace_id: self.trace_id,
+            span_id: new_span.span_id,
+            span: Arc::new(Mutex::new(new_span)),
         }
     }
 }
