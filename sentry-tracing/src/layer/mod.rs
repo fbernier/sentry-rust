@@ -18,6 +18,12 @@ use crate::SENTRY_TRACE_FIELD;
 use crate::TAGS_PREFIX;
 use span_guard_stack::SpanGuardStack;
 
+/// Maximum number of cached forked hubs per thread. When the cache exceeds
+/// this limit, all entries are cleared to bound memory from cross-thread
+/// span migration (where `on_close` fires on a different thread than
+/// `on_enter`, leaving orphaned entries).
+const HUB_CACHE_MAX: usize = 128;
+
 mod span_guard_stack;
 
 bitflags! {
@@ -380,6 +386,9 @@ where
             // allocating a fresh Hub every time. The cache is thread-local, so
             // cross-thread safety is inherent.
             let hub = HUB_CACHE.with_borrow_mut(|cache| {
+                if cache.len() >= HUB_CACHE_MAX {
+                    cache.clear();
+                }
                 cache
                     .entry(id.clone())
                     .or_insert_with(|| {
@@ -557,8 +566,11 @@ thread_local! {
     ///
     /// Each span gets at most one forked hub per thread. Re-entries (e.g. async
     /// polls) reuse the cached hub instead of allocating a fresh fork each time.
-    /// Entries are removed in `on_close` when the span finishes.
-    static HUB_CACHE: RefCell<HashMap<span::Id, Arc<Hub>>> = RefCell::new(HashMap::new());
+    /// Entries are removed in `on_close` when the span finishes on this thread.
+    /// The cache is bounded to prevent unbounded growth from cross-thread span
+    /// migration (where `on_close` fires on a different thread than `on_enter`).
+    static HUB_CACHE: RefCell<HashMap<span::Id, Arc<Hub>>> =
+        RefCell::new(HashMap::with_capacity(HUB_CACHE_MAX));
 }
 
 /// Records all span fields into a `BTreeMap`, reusing a mutable `String` as buffer.
