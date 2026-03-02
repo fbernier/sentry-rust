@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::protocol::{Event, Level, Log, LogAttribute, LogLevel, Map, SessionStatus};
 use crate::types::Uuid;
-use crate::{Integration, IntoBreadcrumbs, Scope, ScopeGuard};
+use crate::{Integration, IntoBreadcrumbs, Scope, ScopeGuard, TransactionOrSpan};
 
 /// The central object that can manage scopes and clients.
 ///
@@ -236,6 +236,16 @@ impl Hub {
                     Default::default()
                 }
             })
+        }}
+    }
+
+    /// Returns the currently active span from the topmost scope.
+    ///
+    /// This uses a read lock on the scope stack, making it cheaper than
+    /// [`configure_scope_direct`] when you only need to read the span.
+    pub fn get_span(&self) -> Option<TransactionOrSpan> {
+        with_client_impl! {{
+            self.inner.with(|stack| stack.top().scope.get_span())
         }}
     }
 
