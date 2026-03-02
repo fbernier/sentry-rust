@@ -1,9 +1,10 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bitflags::bitflags;
+use rustc_hash::FxHashMap;
 use sentry_core::protocol::Value;
 use sentry_core::{Breadcrumb, Hub, HubSwitchGuard, TransactionOrSpan};
 use tracing_core::field::Visit;
@@ -569,8 +570,8 @@ thread_local! {
     /// Entries are removed in `on_close` when the span finishes on this thread.
     /// The cache is bounded to prevent unbounded growth from cross-thread span
     /// migration (where `on_close` fires on a different thread than `on_enter`).
-    static HUB_CACHE: RefCell<HashMap<span::Id, Arc<Hub>>> =
-        RefCell::new(HashMap::with_capacity(HUB_CACHE_MAX));
+    static HUB_CACHE: RefCell<FxHashMap<span::Id, Arc<Hub>>> =
+        RefCell::new(FxHashMap::with_capacity_and_hasher(HUB_CACHE_MAX, Default::default()));
 }
 
 /// Records all span fields into a `BTreeMap`, reusing a mutable `String` as buffer.

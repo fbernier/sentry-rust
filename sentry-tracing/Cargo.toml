@@ -34,6 +34,7 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
 ] }
 sentry-backtrace = { version = "0.46.2", path = "../sentry-backtrace", optional = true }
 bitflags = "2.9.4"
+rustc-hash = "2"
 
 [dev-dependencies]
 log = "0.4"

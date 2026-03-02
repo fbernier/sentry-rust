@@ -2,7 +2,8 @@
 //! by tracing span ID.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+
+use rustc_hash::FxHashMap;
 
 use sentry_core::HubSwitchGuard;
 use tracing_core::span::Id as SpanId;
@@ -13,14 +14,14 @@ use tracing_core::span::Id as SpanId;
 /// When the span exits, we should pop the guard from the stack.
 pub(super) struct SpanGuardStack {
     /// The map of span IDs to their respective guard stacks.
-    guards: HashMap<SpanId, Vec<HubSwitchGuard>>,
+    guards: FxHashMap<SpanId, Vec<HubSwitchGuard>>,
 }
 
 impl SpanGuardStack {
     /// Creates an empty guard stack map.
     pub(super) fn new() -> Self {
         Self {
-            guards: HashMap::new(),
+            guards: FxHashMap::default(),
         }
     }
 
