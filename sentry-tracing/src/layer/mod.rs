@@ -314,7 +314,20 @@ where
         let sentry_op =
             sentry_op.unwrap_or_else(|| format!("{}::{}", span.metadata().target(), span.name()));
 
-        let parent_sentry_span = hub.configure_scope_direct(|scope| scope.get_span());
+        // Walk the tracing span tree to find the nearest ancestor with a
+        // sentry span, avoiding any lock on the Hub for the common case.
+        // Falls back to the Hub scope for non-tracing parents (e.g. manual
+        // `configure_scope(|s| s.set_span(transaction))`).
+        let parent_sentry_span = span
+            .scope()
+            .skip(1)
+            .find_map(|ancestor| {
+                ancestor
+                    .extensions()
+                    .get::<SentrySpanData>()
+                    .map(|data| data.sentry_span.clone())
+            })
+            .or_else(|| hub.get_span());
 
         let mut sentry_span: sentry_core::TransactionOrSpan = match &parent_sentry_span {
             Some(parent) => parent.start_child(&sentry_op, sentry_name).into(),
