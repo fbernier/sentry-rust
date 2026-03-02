@@ -38,26 +38,20 @@ fn tracing_events_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("tracing-events");
 
     group.bench_function("event-no-client", |b| {
-        with_sentry_subscriber(|| {
-            b.iter(|| tracing::error!("benchmark error event"))
-        });
+        with_sentry_subscriber(|| b.iter(|| tracing::error!("benchmark error event")));
     });
 
     let hub = Arc::new(tracing_hub());
 
     group.bench_function("event-with-client", |b| {
         sentry::Hub::run(hub.clone(), || {
-            with_sentry_subscriber(|| {
-                b.iter(|| tracing::error!("benchmark error event"))
-            });
+            with_sentry_subscriber(|| b.iter(|| tracing::error!("benchmark error event")));
         })
     });
 
     group.bench_function("breadcrumb-event", |b| {
         sentry::Hub::run(hub.clone(), || {
-            with_sentry_subscriber(|| {
-                b.iter(|| tracing::info!("benchmark breadcrumb"))
-            });
+            with_sentry_subscriber(|| b.iter(|| tracing::info!("benchmark breadcrumb")));
         })
     });
 
@@ -110,6 +104,22 @@ fn tracing_spans_benchmark(c: &mut Criterion) {
                     for _ in 0..20 {
                         let _enter = span.enter();
                     }
+                })
+            });
+        })
+    });
+
+    group.bench_function("span-reentry-isolated", |b| {
+        sentry::Hub::run(hub.clone(), || {
+            with_sentry_subscriber(|| {
+                let span = tracing::info_span!("reentry-bench");
+                // Warm up: first enter creates the fork
+                {
+                    let _enter = span.enter();
+                }
+                // Benchmark: pure re-entry cost
+                b.iter(|| {
+                    let _enter = span.enter();
                 })
             });
         })
