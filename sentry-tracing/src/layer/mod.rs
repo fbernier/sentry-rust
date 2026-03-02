@@ -369,12 +369,13 @@ where
             let hub = HUB_CACHE.with_borrow_mut(|cache| {
                 cache
                     .entry(id.clone())
-                    .or_insert_with(|| Arc::new(Hub::new_from_top(&data.hub)))
+                    .or_insert_with(|| {
+                        Arc::new(Hub::new_from_top_with_span(
+                            &data.hub,
+                            Some(data.sentry_span.clone()),
+                        ))
+                    })
                     .clone()
-            });
-
-            hub.configure_scope_direct(|scope| {
-                scope.set_span(Some(data.sentry_span.clone()));
             });
 
             let guard = HubSwitchGuard::new(hub);
