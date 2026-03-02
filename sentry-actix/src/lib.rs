@@ -282,7 +282,7 @@ where
         let source_hub = inner.hub.clone().unwrap_or_else(Hub::main);
 
         // Fast path: skip all Sentry overhead when no client is bound.
-        if source_hub.client().is_none() {
+        if !source_hub.has_client() {
             let svc = self.service.clone();
             return async move { svc.call(req).await }.boxed_local();
         }

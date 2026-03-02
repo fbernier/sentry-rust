@@ -54,8 +54,8 @@ pub struct Scope {
     pub(crate) event_processors: Arc<Vec<EventProcessor>>,
     #[cfg(feature = "release-health")]
     pub(crate) session: Arc<Mutex<Option<Session>>>,
-    pub(crate) request: Option<Request>,
-    pub(crate) span: Option<TransactionOrSpan>,
+    pub(crate) request: Option<Box<Request>>,
+    pub(crate) span: Arc<Option<TransactionOrSpan>>,
     pub(crate) attachments: Arc<Vec<Attachment>>,
     pub(crate) propagation_context: SentryTrace,
 }
@@ -283,7 +283,7 @@ impl Scope {
         }
 
         if event.request.is_none() {
-            event.request = self.request.clone();
+            event.request = self.request.as_deref().cloned();
         }
 
         event.breadcrumbs.extend(self.breadcrumbs.iter().cloned());
@@ -342,7 +342,7 @@ impl Scope {
         }
 
         if transaction.request.is_none() {
-            transaction.request = self.request.clone();
+            transaction.request = self.request.as_deref().cloned();
         }
 
         transaction
@@ -411,17 +411,17 @@ impl Scope {
 
     /// Sets the HTTP request data for this scope.
     pub fn set_request(&mut self, request: Option<Request>) {
-        self.request = request;
+        self.request = request.map(Box::new);
     }
 
     /// Set the given [`TransactionOrSpan`] as the active span for this scope.
     pub fn set_span(&mut self, span: Option<TransactionOrSpan>) {
-        self.span = span;
+        self.span = Arc::new(span);
     }
 
     /// Returns the currently active span.
     pub fn get_span(&self) -> Option<TransactionOrSpan> {
-        self.span.clone()
+        self.span.as_ref().clone()
     }
 
     #[allow(unused_variables)]

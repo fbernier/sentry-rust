@@ -142,15 +142,12 @@ impl Hub {
     /// [`Hub::configure_scope_direct`] to set the span, because it avoids
     /// a separate write lock and `Arc::make_mut` call. The span is set
     /// directly on the cloned scope before it is wrapped in an `Arc`.
-    pub fn new_from_top_with_span<H: AsRef<Hub>>(
-        other: H,
-        span: Option<TransactionOrSpan>,
-    ) -> Hub {
+    pub fn new_from_top_with_span<H: AsRef<Hub>>(other: H, span: Option<TransactionOrSpan>) -> Hub {
         let hub = other.as_ref();
         hub.inner.with(|stack| {
             let top = stack.top();
             let mut scope = (*top.scope).clone();
-            scope.span = span;
+            scope.span = Arc::new(span);
             Hub::new(top.client.clone(), Arc::new(scope))
         })
     }
